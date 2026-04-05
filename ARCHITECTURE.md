@@ -7,9 +7,12 @@ Swift sources are grouped under **`App/`** (shell) and **`Game/`** (one folder p
 ```
 MyFirstGame/
   App/
-    MyFirstGameApp.swift
     ContentView.swift
+    GameHUDView.swift
+    MyFirstGameApp.swift
+    PongGameBridge.swift
   Game/
+    Flow/PongFlowState.swift
     Ball/PongBall.swift
     Court/PongCourtElements.swift
     Court/PongGoalZones.swift

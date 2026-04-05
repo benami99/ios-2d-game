@@ -5,12 +5,14 @@
 
 import SpriteKit
 
-/// SpriteKit scene: court, physics, scoring, AI, match rules (Phase 5), and touch routing by `PongGameMode`.
+/// SpriteKit scene: court, physics, match rules, and touch routing. Phase 6: flow state & HUD live in `PongGameBridge` + SwiftUI.
 final class PongScene: SKScene, SKPhysicsContactDelegate {
 
     // MARK: - Configuration
 
     private let gameMode: PongGameMode
+
+    weak var bridge: PongGameBridge?
 
     /// Exponential smoothing for AI toward the ball (higher = snappier).
     private let aiTrackingLambda: CGFloat = 9
@@ -24,8 +26,6 @@ final class PongScene: SKScene, SKPhysicsContactDelegate {
 
     private var leftScore = 0
     private var rightScore = 0
-
-    private var gameOverRoot: SKNode?
 
     /// Shown only when `PongRules.requireTapToServeAfterPoint` is true.
     private var serveHintLabel: SKLabelNode?
@@ -44,13 +44,11 @@ final class PongScene: SKScene, SKPhysicsContactDelegate {
     private lazy var leftGoal: SKSpriteNode = PongGoalZones.makeLeftGoal()
     private lazy var rightGoal: SKSpriteNode = PongGoalZones.makeRightGoal()
 
-    private lazy var leftScoreLabel: SKLabelNode = makeScoreLabel(horizontalAlignment: .left)
-    private lazy var rightScoreLabel: SKLabelNode = makeScoreLabel(horizontalAlignment: .right)
-
     // MARK: - Init
 
-    init(gameMode: PongGameMode = .twoPlayers) {
+    init(gameMode: PongGameMode = .twoPlayers, bridge: PongGameBridge?) {
         self.gameMode = gameMode
+        self.bridge = bridge
         super.init(size: Playfield.logicalSize)
     }
 
@@ -62,12 +60,13 @@ final class PongScene: SKScene, SKPhysicsContactDelegate {
 
     override func didMove(to view: SKView) {
         super.didMove(to: view)
+        bridge?.scene = self
         configureScene()
         setupPhysicsWorld()
         addCourtNodesIfNeeded()
         layoutPaddles()
         attachAllPhysics()
-        configureScoreLabels()
+        syncScoresToBridge()
         phase = .rally
         launchBall()
     }
@@ -86,6 +85,7 @@ final class PongScene: SKScene, SKPhysicsContactDelegate {
         }
         lastUpdateTime = currentTime
 
+        guard !isPaused else { return }
         guard phase == .rally, gameMode == .onePlayerVsAI else { return }
         updateAIPaddle(deltaTime: dt)
     }
@@ -104,7 +104,7 @@ final class PongScene: SKScene, SKPhysicsContactDelegate {
         physicsWorld.contactDelegate = self
     }
 
-    /// Builds node tree once: walls, goals, line, ball, paddles, HUD.
+    /// Builds node tree once: walls, goals, line, ball, paddles (score HUD is SwiftUI).
     private func addCourtNodesIfNeeded() {
         guard bottomWall.parent == nil else { return }
 
@@ -132,13 +132,6 @@ final class PongScene: SKScene, SKPhysicsContactDelegate {
             addChild(leftPaddle)
             addChild(rightPaddle)
         }
-
-        if leftScoreLabel.parent == nil {
-            leftScoreLabel.zPosition = 10
-            rightScoreLabel.zPosition = 10
-            addChild(leftScoreLabel)
-            addChild(rightScoreLabel)
-        }
     }
 
     private func attachAllPhysics() {
@@ -147,29 +140,8 @@ final class PongScene: SKScene, SKPhysicsContactDelegate {
         PongBall.attachPhysics(to: ball)
     }
 
-    // MARK: - Score HUD
-
-    private func makeScoreLabel(horizontalAlignment: SKLabelHorizontalAlignmentMode) -> SKLabelNode {
-        let label = SKLabelNode(fontNamed: "HelveticaNeue-Bold")
-        label.fontSize = 36
-        label.fontColor = SKColor(white: 1, alpha: 0.85)
-        label.verticalAlignmentMode = .center
-        label.horizontalAlignmentMode = horizontalAlignment
-        label.text = "0"
-        return label
-    }
-
-    private func configureScoreLabels() {
-        let inset: CGFloat = 48
-        let topY = Playfield.halfHeight - 56
-        leftScoreLabel.position = CGPoint(x: -Playfield.halfWidth + inset, y: topY)
-        rightScoreLabel.position = CGPoint(x: Playfield.halfWidth - inset, y: topY)
-        refreshScoreLabels()
-    }
-
-    private func refreshScoreLabels() {
-        leftScoreLabel.text = "\(leftScore)"
-        rightScoreLabel.text = "\(rightScore)"
+    private func syncScoresToBridge() {
+        bridge?.updateScores(left: leftScore, right: rightScore)
     }
 
     // MARK: - Ball & serve
@@ -226,7 +198,7 @@ final class PongScene: SKScene, SKPhysicsContactDelegate {
         serveHintLabel = nil
     }
 
-    // MARK: - Game over (Phase 5)
+    // MARK: - Game over (match end)
 
     private func enterGameOver(winner: PongSide) {
         removeAction(forKey: "postPointServe")
@@ -237,64 +209,18 @@ final class PongScene: SKScene, SKPhysicsContactDelegate {
         ball.physicsBody?.velocity = .zero
         ball.position = PongBall.restPosition
 
-        gameOverRoot?.removeFromParent()
-
-        let root = SKNode()
-        root.zPosition = 25
-        root.name = "gameOver"
-
-        let title = SKLabelNode(fontNamed: "HelveticaNeue-Bold")
-        title.fontSize = 40
-        title.fontColor = SKColor(white: 1, alpha: 1)
-        title.text = "GAME OVER"
-        title.verticalAlignmentMode = .center
-        title.horizontalAlignmentMode = .center
-        title.position = .zero
-
-        let subtitle = SKLabelNode(fontNamed: "HelveticaNeue")
-        subtitle.fontSize = 28
-        subtitle.fontColor = SKColor(white: 1, alpha: 0.9)
-        subtitle.text = winnerMessage(for: winner)
-        subtitle.verticalAlignmentMode = .center
-        subtitle.horizontalAlignmentMode = .center
-        subtitle.position = CGPoint(x: 0, y: -52)
-
-        let hint = SKLabelNode(fontNamed: "HelveticaNeue")
-        hint.fontSize = 20
-        hint.fontColor = SKColor(white: 1, alpha: 0.65)
-        hint.text = "Tap to play again"
-        hint.verticalAlignmentMode = .center
-        hint.horizontalAlignmentMode = .center
-        hint.position = CGPoint(x: 0, y: -100)
-
-        root.addChild(title)
-        root.addChild(subtitle)
-        root.addChild(hint)
-        addChild(root)
-        gameOverRoot = root
+        isPaused = true
+        bridge?.notifyMatchEnded(winner: winner)
+        syncScoresToBridge()
     }
 
-    private func winnerMessage(for winner: PongSide) -> String {
-        switch (gameMode, winner) {
-        case (.onePlayerVsAI, .left):
-            return "AI wins"
-        case (.onePlayerVsAI, .right):
-            return "You win"
-        case (.twoPlayers, .left):
-            return "Left player wins"
-        case (.twoPlayers, .right):
-            return "Right player wins"
-        }
-    }
-
-    /// Full reset: scores, HUD, removes overlay, serves a new first ball.
-    private func restartMatch() {
-        gameOverRoot?.removeFromParent()
-        gameOverRoot = nil
+    /// Called from `PongGameBridge` (Restart) — full reset without recreating the scene.
+    func restartMatchFromHUD() {
+        removeAction(forKey: "postPointServe")
 
         leftScore = 0
         rightScore = 0
-        refreshScoreLabels()
+        syncScoresToBridge()
 
         phase = .rally
         launchBall()
@@ -360,10 +286,7 @@ final class PongScene: SKScene, SKPhysicsContactDelegate {
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if case .gameOver = phase {
-            restartMatch()
-            return
-        }
+        guard !isPaused else { return }
 
         if phase == .awaitingServe, PongRules.requireTapToServeAfterPoint {
             launchBall()
@@ -375,6 +298,7 @@ final class PongScene: SKScene, SKPhysicsContactDelegate {
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard !isPaused else { return }
         guard phase == .rally else { return }
         touches.forEach { updatePaddle(for: $0) }
     }
@@ -399,7 +323,7 @@ final class PongScene: SKScene, SKPhysicsContactDelegate {
             return
         }
 
-        refreshScoreLabels()
+        syncScoresToBridge()
 
         let win = PongRules.pointsToWin
         if leftScore >= win {
