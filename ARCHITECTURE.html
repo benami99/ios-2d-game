@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MyFirstGame — architecture</title>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({ theme: "neutral", securityLevel: "loose" });
+    await mermaid.run({ querySelector: ".mermaid" });
+  </script>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      line-height: 1.5;
+      max-width: 56rem;
+      margin: 0 auto;
+      padding: 1.5rem 1rem 3rem;
+    }
+    h1 { font-size: 1.5rem; font-weight: 600; margin-top: 0; }
+    h2 { font-size: 1.15rem; font-weight: 600; margin-top: 2rem; }
+    p { margin: 0.75rem 0; }
+    ol { padding-left: 1.25rem; }
+    li { margin: 0.35rem 0; }
+    code { font-size: 0.92em; padding: 0.1em 0.35em; border-radius: 4px; background: color-mix(in srgb, CanvasText 8%, transparent); }
+    .diagram {
+      margin: 1rem 0 1.5rem;
+      padding: 1rem;
+      border-radius: 8px;
+      background: color-mix(in srgb, CanvasText 5%, transparent);
+      overflow-x: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.95rem;
+      margin: 1rem 0;
+    }
+    th, td {
+      border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+      padding: 0.5rem 0.65rem;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: color-mix(in srgb, CanvasText 6%, transparent); }
+    hr { border: none; border-top: 1px solid color-mix(in srgb, CanvasText 15%, transparent); margin: 2rem 0; }
+  </style>
+</head>
+<body>
+
+  <h1>MyFirstGame — file flow (current)</h1>
+
+  <h2>Project layout</h2>
+  <p>Swift sources under <code>App/</code> and <code>Game/&lt;Entity&gt;/</code>; asset catalog at <code>Assets.xcassets/</code>.</p>
+  <pre style="background:color-mix(in srgb, CanvasText 6%, transparent);padding:1rem;border-radius:8px;font-size:0.85rem;overflow-x:auto;">MyFirstGame/
+  App/
+    MyFirstGameApp.swift
+    ContentView.swift
+  Game/
+    Ball/PongBall.swift
+    Court/PongCourtElements.swift
+    Court/PongGoalZones.swift
+    GameMode/PongGameMode.swift
+    Paddle/PongPaddle.swift
+    Physics/PhysicsCategory.swift
+    Playfield/Playfield.swift
+    Scene/PongScene.swift
+  Assets.xcassets/</pre>
+
+  <p>Two views: <strong>runtime</strong> (what runs when the app launches) and <strong>code dependencies</strong> (which Swift files reference which).</p>
+
+  <h2>1. Runtime: from <code>@main</code> to the scene</h2>
+  <div class="diagram mermaid">
+flowchart LR
+    subgraph swiftui["SwiftUI — App/"]
+        A["MyFirstGameApp.swift<br/>@main → WindowGroup"]
+        B["ContentView.swift<br/>@State PongScene"]
+        C["SpriteView"]
+    end
+
+    subgraph spritekit["SpriteKit — Game/Scene/"]
+        D["SKView"]
+        E["PongScene.swift<br/>SKScene"]
+    end
+
+    A --> B
+    B --> C
+    C --> D
+    D --> E
+  </div>
+
+  <p><strong>Sequence (conceptual):</strong></p>
+  <ol>
+    <li><strong>App/MyFirstGameApp.swift</strong> — Process entry (<code>@main</code>); builds the app’s scene and opens a window whose root is <code>ContentView</code>.</li>
+    <li><strong>App/ContentView.swift</strong> — Creates <strong>one</strong> <code>PongScene</code> (stored in <code>@State</code>) and passes it to <code>SpriteView</code>.</li>
+    <li><strong>SpriteView</strong> — Hosts an <strong>SKView</strong> and presents <code>PongScene</code>.</li>
+    <li><strong>Game/Scene/PongScene.swift</strong> — <code>didMove(to:)</code> runs: scene, physics, court, paddles, AI, scoring.</li>
+  </ol>
+
+  <hr />
+
+  <h2>2. Dependencies: which files talk to which</h2>
+  <p>Supporting types live under <code>Game/</code>; <strong>PongScene</strong> wires them together.</p>
+
+  <div class="diagram mermaid">
+flowchart TB
+    subgraph app_layer["App shell"]
+        App["App/MyFirstGameApp.swift"]
+        CV["App/ContentView.swift"]
+    end
+
+    subgraph game_scene["Game Scene"]
+        PS["Game/Scene/PongScene.swift"]
+    end
+
+    subgraph data["Layout & rules"]
+        PF["Game/Playfield/Playfield.swift"]
+        PP["Game/Paddle/PongPaddle.swift"]
+        PB["Game/Ball/PongBall.swift"]
+        GM["Game/GameMode/PongGameMode.swift"]
+    end
+
+    subgraph court["Court construction"]
+        PCE["Game/Court/PongCourtElements.swift"]
+        PGZ["Game/Court/PongGoalZones.swift"]
+        Phy["Game/Physics/PhysicsCategory.swift"]
+    end
+
+    App --> CV
+    CV --> PS
+    PS --> PF
+    PS --> PP
+    PS --> PB
+    PS --> GM
+    PS --> PCE
+    PS --> PGZ
+    PCE --> PF
+    PCE --> Phy
+    PGZ --> PF
+    PGZ --> Phy
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>File</th>
+        <th>Role in this diagram</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>App/MyFirstGameApp.swift</code></td>
+        <td>Entry → <code>WindowGroup</code> → <code>ContentView</code></td>
+      </tr>
+      <tr>
+        <td><code>App/ContentView.swift</code></td>
+        <td>Owns <code>PongScene</code> instance → <code>SpriteView</code></td>
+      </tr>
+      <tr>
+        <td><code>Game/Scene/PongScene.swift</code></td>
+        <td>Scene lifecycle, physics, HUD, AI, touch routing</td>
+      </tr>
+      <tr>
+        <td><code>Game/Playfield/Playfield.swift</code></td>
+        <td>Logical size and inner/outer Y bounds (no SpriteKit)</td>
+      </tr>
+      <tr>
+        <td><code>Game/Paddle/PongPaddle.swift</code></td>
+        <td>Paddle size, margin, sprite + physics</td>
+      </tr>
+      <tr>
+        <td><code>Game/Ball/PongBall.swift</code></td>
+        <td>Ball geometry + physics</td>
+      </tr>
+      <tr>
+        <td><code>Game/Court/PongCourtElements.swift</code></td>
+        <td>Walls + center line</td>
+      </tr>
+      <tr>
+        <td><code>Game/Court/PongGoalZones.swift</code></td>
+        <td>Goal sensors</td>
+      </tr>
+      <tr>
+        <td><code>Game/Physics/PhysicsCategory.swift</code></td>
+        <td>Physics category bitmasks</td>
+      </tr>
+      <tr>
+        <td><code>Game/GameMode/PongGameMode.swift</code></td>
+        <td>One player vs two players</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <hr />
+
+  <h2>3. Preview path</h2>
+  <p>Xcode <strong>previews</strong> skip <code>@main</code> and instantiate <code>ContentView()</code> directly; from there the flow is the same: <code>ContentView</code> → <code>SpriteView</code> → <code>PongScene</code>.</p>
+
+  <p style="margin-top:2rem;font-size:0.9rem;opacity:0.85;">Open this file in a browser (double-click or drag onto Safari/Chrome). Source: <code>ARCHITECTURE.md</code>.</p>
+
+</body>
+</html>

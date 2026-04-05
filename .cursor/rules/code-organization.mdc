@@ -1,0 +1,29 @@
+---
+description: One responsibility per file; detailed block comments for clarity
+alwaysApply: true
+---
+
+# Files and comments
+
+## Single responsibility per file
+
+- Prefer **one main type or concern per file** (e.g. one `enum` for layout constants, one factory for court nodes, one `SKScene` subclass for orchestration).
+- When a file grows to cover multiple unrelated concerns, **split** into new files in the same module instead of stacking unrelated types in one file.
+- **Exceptions**: tiny helpers that only exist to support a single public API may stay colocated if splitting would obscure the API.
+
+```swift
+// ❌ Avoid: Playfield metrics + physics masks + all node factories + SKScene in one file.
+
+// ✅ Prefer: Playfield.swift, PhysicsCategory.swift, PongCourtElements.swift, PongScene.swift
+```
+
+## Detailed comments
+
+- Add a **short comment above each logical block** (type, extension, `MARK` section, or private helper group) stating **what it does** and **why it exists**, not a restatement of the identifier name.
+- For non-obvious math, coordinates, or lifecycle order, **one line** explaining the invariant or call order is enough.
+- **Avoid**: noisy comments on every line, repeating the code verbatim, or deleting existing useful comments when editing nearby code.
+
+```swift
+// ❌ // set x to 5
+// ✅ // Wall center sits at -halfH + thickness/2 so the inner face aligns with the playfield bound.
+```
