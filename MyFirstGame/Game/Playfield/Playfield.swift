@@ -14,10 +14,14 @@ enum Playfield {
     static var halfWidth: CGFloat { logicalSize.width / 2 }
     static var halfHeight: CGFloat { logicalSize.height / 2 }
 
-    /// Horizontal band at top/bottom for wall bodies (and future ball bounces).
+    /// Vertical bands at left/right for wall bodies (ball bounces off these).
     static let wallThickness: CGFloat = 28
 
-    /// Inner horizontal segment between wall inner faces (paddle / ball vertical range uses this).
-    static var innerBottomY: CGFloat { -halfHeight + wallThickness }
-    static var innerTopY: CGFloat { halfHeight - wallThickness }
+    /// Inner vertical segment between wall inner faces (paddle horizontal range / ball x-range).
+    static var innerLeftX: CGFloat { -halfWidth + wallThickness }
+    static var innerRightX: CGFloat { halfWidth - wallThickness }
+
+    /// Full inner height between top and bottom outer edges (goals sit in the bands beyond paddles).
+    static var innerBottomY: CGFloat { -halfHeight }
+    static var innerTopY: CGFloat { halfHeight }
 }

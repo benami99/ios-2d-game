@@ -9,20 +9,26 @@ import SwiftUI
 struct GameHUDView: View {
 
     @ObservedObject var bridge: PongGameBridge
-    let gameMode: PongGameMode
+    @Binding var gameMode: PongGameMode
 
     var body: some View {
         ZStack {
+            // Scores on the trailing edge: top score in upper half, bottom score in lower half, symmetric around vertical midline (matches court center).
+            scoreBar
+                .allowsHitTesting(false)
+
             VStack(spacing: 0) {
-                scoreBar
                 controlBar
+                Spacer()
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.horizontal, 16)
             .padding(.top, 8)
 
             fullScreenOverlays
         }
+        // Cover the full window so touches don’t fall through to SpriteView (which was eating Resume taps).
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @ViewBuilder
@@ -36,18 +42,32 @@ struct GameHUDView: View {
         }
     }
 
+    /// `leftScore` = top player, `rightScore` = bottom player (`PongScene`). Fixed gap between scores so the court midline bisects that gap (equal offset from center to each score).
     private var scoreBar: some View {
-        HStack {
-            Text("\(bridge.leftScore)")
-                .font(.system(size: 36, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
-            Spacer()
-            Text("\(bridge.rightScore)")
-                .font(.system(size: 36, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+        GeometryReader { _ in
+            let padFromCenter: CGFloat = 6
+            let scoreFont = Font.system(size: 36, weight: .bold, design: .rounded)
+
+            VStack(spacing: 2 * padFromCenter) {
+                Text("\(bridge.leftScore)")
+                    .font(scoreFont)
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+                    .monospacedDigit()
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+
+                Text("\(bridge.rightScore)")
+                    .font(scoreFont)
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+                    .monospacedDigit()
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .ignoresSafeArea()
     }
 
     private var controlBar: some View {
@@ -55,16 +75,14 @@ struct GameHUDView: View {
             if bridge.flowState == .playing {
                 Button("Pause") { bridge.pause() }
                     .buttonStyle(.borderedProminent)
-                Button("Menu") { bridge.goToMenu() }
+                Button("Exit") { bridge.goToMenu() }
                     .buttonStyle(.bordered)
             } else if bridge.flowState == .paused {
-                Button("Resume") { bridge.resume() }
-                    .buttonStyle(.borderedProminent)
-                Button("Menu") { bridge.goToMenu() }
-                    .buttonStyle(.bordered)
+                // Resume / Menu live in `pausedOverlay` so taps aren’t delivered to SpriteView underneath.
+                EmptyView()
             } else if bridge.flowState == .menu {
-                Button("Play") { bridge.playFromMenu() }
-                    .buttonStyle(.borderedProminent)
+                // Play only in `menuOverlay` (avoids duplicate “double” Play buttons).
+                EmptyView()
             }
         }
         .padding(.top, 4)
@@ -74,11 +92,19 @@ struct GameHUDView: View {
         ZStack {
             Color.black.opacity(0.35)
                 .ignoresSafeArea()
-            Text("Paused")
-                .font(.largeTitle.weight(.semibold))
-                .foregroundStyle(.white)
+                .onTapGesture { bridge.resume() }
+
+            VStack(spacing: 20) {
+                Text("Paused")
+                    .font(.largeTitle.weight(.semibold))
+                    .foregroundStyle(.white)
+                Button("Resume") { bridge.resume() }
+                    .buttonStyle(.borderedProminent)
+                Button("Exit") { bridge.goToMenu() }
+                    .buttonStyle(.bordered)
+            }
+            .padding(24)
         }
-        .allowsHitTesting(false)
     }
 
     private var menuOverlay: some View {
@@ -89,13 +115,53 @@ struct GameHUDView: View {
                 Text("Pong")
                     .font(.largeTitle.weight(.bold))
                     .foregroundStyle(.white)
-                Text("Tap Play to resume")
+                Text("Choose a mode, then tap Play")
                     .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .multilineTextAlignment(.center)
+                menuModePickerRow
                 Button("Play") { bridge.playFromMenu() }
                     .buttonStyle(.borderedProminent)
             }
+            .padding(.horizontal, 24)
         }
+    }
+
+    /// Light material so both mode labels stay readable (segmented-style on dark overlay).
+    private var menuModePickerRow: some View {
+        HStack(spacing: 10) {
+            menuModeButton(title: "1 vs AI", mode: .onePlayerVsAI)
+            menuModeButton(title: "2 players", mode: .twoPlayers)
+        }
+        .padding(10)
+        .frame(maxWidth: 400)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .colorScheme(.light)
+    }
+
+    @ViewBuilder
+    private func menuModeButton(title: String, mode: PongGameMode) -> some View {
+        let selected = gameMode == mode
+        Button {
+            gameMode = mode
+        } label: {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(selected ? Color.primary : Color.primary.opacity(0.55))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .padding(.horizontal, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(selected ? Color.accentColor.opacity(0.28) : Color.clear)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.black.opacity(selected ? 0.22 : 0.12), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     }
 
     private func gameOverOverlay(winner: PongSide) -> some View {
@@ -113,7 +179,7 @@ struct GameHUDView: View {
                 HStack(spacing: 16) {
                     Button("Restart") { bridge.restartMatch() }
                         .buttonStyle(.borderedProminent)
-                    Button("Menu") {
+                    Button("Exit") {
                         bridge.matchWinner = nil
                         bridge.goToMenu()
                     }
@@ -128,8 +194,8 @@ struct GameHUDView: View {
         switch (gameMode, winner) {
         case (.onePlayerVsAI, .left): return "AI wins"
         case (.onePlayerVsAI, .right): return "You win"
-        case (.twoPlayers, .left): return "Left player wins"
-        case (.twoPlayers, .right): return "Right player wins"
+        case (.twoPlayers, .left): return "Top player wins"
+        case (.twoPlayers, .right): return "Bottom player wins"
         }
     }
 }

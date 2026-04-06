@@ -4,13 +4,14 @@
 //
 
 import Combine
+import SpriteKit
 import SwiftUI
 
 /// Connects `PongScene` to SwiftUI: scores, flow state, and HUD actions (Phase 6).
 @MainActor
 final class PongGameBridge: ObservableObject {
 
-    @Published var flowState: PongFlowState = .playing
+    @Published var flowState: PongFlowState = .menu
 
     @Published var leftScore = 0
     @Published var rightScore = 0
@@ -43,13 +44,16 @@ final class PongGameBridge: ObservableObject {
     }
 
     func goToMenu() {
+        matchWinner = nil
         flowState = .menu
         scene?.isPaused = true
+        scene?.resetMatchForMenu()
     }
 
     func playFromMenu() {
         flowState = .playing
         scene?.isPaused = false
+        scene?.launchBallAfterMenu()
     }
 
     /// Full match reset from HUD; keeps current `PongScene` instance.

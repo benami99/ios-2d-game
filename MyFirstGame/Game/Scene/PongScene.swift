@@ -5,7 +5,14 @@
 
 import SpriteKit
 
+/// Bundled one-shots (sources live under `MyFirstGame/Sounds/`; copied to the app bundle root).
+private enum PongSoundFile {
+    static let paddleHit = "paddle_hit.wav"
+    static let score = "score.wav"
+}
+
 /// SpriteKit scene: court, physics, match rules, and touch routing. Phase 6: flow state & HUD live in `PongGameBridge` + SwiftUI.
+/// Court is **rotated**: paddles on **top** and **bottom**, walls on **left** and **right**. `leftScore` = top player, `rightScore` = bottom player.
 final class PongScene: SKScene, SKPhysicsContactDelegate {
 
     // MARK: - Configuration
@@ -19,30 +26,39 @@ final class PongScene: SKScene, SKPhysicsContactDelegate {
 
     private var lastUpdateTime: TimeInterval = 0
 
+    /// Avoid stacked paddle contacts playing multiple times in one hit.
+    private var lastPaddleSoundAt: TimeInterval = 0
+    private let paddleSoundCooldown: TimeInterval = 0.07
+
     /// Blocks goal contacts while the ball is being reset or the match is not in rally.
     private var isBallResetting = false
 
     private var phase: PongMatchPhase = .rally
 
+    /// Top player score (HUD left).
     private var leftScore = 0
+    /// Bottom player score (HUD right).
     private var rightScore = 0
+
+    /// Paddle hits during the current rally; drives per-volley speed ramp. Resets on each serve.
+    private var rallyHitCount = 0
 
     /// Shown only when `PongRules.requireTapToServeAfterPoint` is true.
     private var serveHintLabel: SKLabelNode?
 
     // MARK: - Nodes
 
-    private lazy var leftPaddle: SKSpriteNode = PongPaddle.makeSprite()
-    private lazy var rightPaddle: SKSpriteNode = PongPaddle.makeSprite()
+    private lazy var topPaddle: SKSpriteNode = PongPaddle.makeSprite()
+    private lazy var bottomPaddle: SKSpriteNode = PongPaddle.makeSprite()
 
     private lazy var ball: SKShapeNode = PongBall.makeNode()
 
-    private lazy var topWall: SKSpriteNode = PongCourtElements.makeTopWall()
-    private lazy var bottomWall: SKSpriteNode = PongCourtElements.makeBottomWall()
+    private lazy var leftWall: SKSpriteNode = PongCourtElements.makeLeftWall()
+    private lazy var rightWall: SKSpriteNode = PongCourtElements.makeRightWall()
     private lazy var centerLine: SKShapeNode = PongCourtElements.makeCenterLine()
 
-    private lazy var leftGoal: SKSpriteNode = PongGoalZones.makeLeftGoal()
-    private lazy var rightGoal: SKSpriteNode = PongGoalZones.makeRightGoal()
+    private lazy var topGoal: SKSpriteNode = PongGoalZones.makeTopGoal()
+    private lazy var bottomGoal: SKSpriteNode = PongGoalZones.makeBottomGoal()
 
     // MARK: - Init
 
@@ -68,7 +84,14 @@ final class PongScene: SKScene, SKPhysicsContactDelegate {
         attachAllPhysics()
         syncScoresToBridge()
         phase = .rally
-        launchBall()
+        if bridge?.flowState == .menu || bridge?.flowState == .gameOver {
+            isPaused = true
+            ball.position = PongBall.restPosition
+            ball.physicsBody?.velocity = .zero
+            hideServeHint()
+        } else {
+            launchBall()
+        }
     }
 
     override func didChangeSize(_ oldSize: CGSize) {
@@ -86,8 +109,36 @@ final class PongScene: SKScene, SKPhysicsContactDelegate {
         lastUpdateTime = currentTime
 
         guard !isPaused else { return }
+        if phase == .rally {
+            nudgeBallStuckLoopsIfNeeded()
+            enforceBallRallySpeed()
+        }
         guard phase == .rally, gameMode == .onePlayerVsAI else { return }
         updateAIPaddle(deltaTime: dt)
+    }
+
+    private func nudgeBallStuckLoopsIfNeeded() {
+        guard let v = ball.physicsBody?.velocity else { return }
+        var next = v
+        if let fixed = PongBallVelocitySanity.correctedVelocityIfVerticalLoop(velocity: next) {
+            next = fixed
+        }
+        if let fixed = PongBallVelocitySanity.correctedVelocityIfHorizontalLoop(velocity: next) {
+            next = fixed
+        }
+        ball.physicsBody?.velocity = next
+    }
+
+    /// Keeps magnitude near the rally target (score ramp + per-hit boost) so physics quirks don’t drain or inflate speed.
+    private func enforceBallRallySpeed() {
+        guard let body = ball.physicsBody else { return }
+        let v = body.velocity
+        let s = hypot(v.dx, v.dy)
+        guard s > 8 else { return }
+        let targetSpeed = PongRules.rallySpeed(totalPointsScored: leftScore + rightScore, rallyHits: rallyHitCount)
+        let scale = targetSpeed / s
+        guard abs(scale - 1.0) > 0.006 else { return }
+        body.velocity = CGVector(dx: v.dx * scale, dy: v.dy * scale)
     }
 
     // MARK: - Scene & world
@@ -104,21 +155,20 @@ final class PongScene: SKScene, SKPhysicsContactDelegate {
         physicsWorld.contactDelegate = self
     }
 
-    /// Builds node tree once: walls, goals, line, ball, paddles (score HUD is SwiftUI).
     private func addCourtNodesIfNeeded() {
-        guard bottomWall.parent == nil else { return }
+        guard leftWall.parent == nil else { return }
 
-        bottomWall.zPosition = 0
-        topWall.zPosition = 0
+        leftWall.zPosition = 0
+        rightWall.zPosition = 0
         centerLine.zPosition = 0.5
-        leftGoal.zPosition = 0
-        rightGoal.zPosition = 0
+        topGoal.zPosition = 0
+        bottomGoal.zPosition = 0
 
-        addChild(bottomWall)
-        addChild(topWall)
+        addChild(leftWall)
+        addChild(rightWall)
         addChild(centerLine)
-        addChild(leftGoal)
-        addChild(rightGoal)
+        addChild(topGoal)
+        addChild(bottomGoal)
 
         if ball.parent == nil {
             ball.zPosition = 2
@@ -126,17 +176,17 @@ final class PongScene: SKScene, SKPhysicsContactDelegate {
             addChild(ball)
         }
 
-        if leftPaddle.parent == nil {
-            leftPaddle.zPosition = 1
-            rightPaddle.zPosition = 1
-            addChild(leftPaddle)
-            addChild(rightPaddle)
+        if topPaddle.parent == nil {
+            topPaddle.zPosition = 1
+            bottomPaddle.zPosition = 1
+            addChild(topPaddle)
+            addChild(bottomPaddle)
         }
     }
 
     private func attachAllPhysics() {
-        PongPaddle.attachPhysics(to: leftPaddle)
-        PongPaddle.attachPhysics(to: rightPaddle)
+        PongPaddle.attachPhysics(to: topPaddle)
+        PongPaddle.attachPhysics(to: bottomPaddle)
         PongBall.attachPhysics(to: ball)
     }
 
@@ -144,38 +194,61 @@ final class PongScene: SKScene, SKPhysicsContactDelegate {
         bridge?.updateScores(left: leftScore, right: rightScore)
     }
 
+    func resetMatchForMenu() {
+        removeAction(forKey: "postPointServe")
+        leftScore = 0
+        rightScore = 0
+        syncScoresToBridge()
+        phase = .rally
+        isBallResetting = true
+        ball.position = PongBall.restPosition
+        ball.physicsBody?.velocity = .zero
+        resetPaddlesToCenter()
+        hideServeHint()
+        isBallResetting = false
+    }
+
+    func launchBallAfterMenu() {
+        launchBall()
+    }
+
     // MARK: - Ball & serve
 
-    /// Puts the ball in play from center with a random direction (used after points and on match restart).
-    private func launchBall() {
+    /// - Parameter totalPointsForSpeed: Pass combined score when scheduling a delayed serve so speed matches the point just scored (avoids stale reads).
+    private func launchBall(totalPointsForSpeed: Int? = nil) {
         hideServeHint()
         removeAction(forKey: "postPointServe")
 
         ball.position = PongBall.restPosition
         ball.physicsBody?.velocity = .zero
+        rallyHitCount = 0
+        let combined = totalPointsForSpeed ?? (leftScore + rightScore)
+        let speed = PongRules.launchSpeed(totalPointsScored: combined)
         let angle = CGFloat.random(in: -CGFloat.pi / 5 ... CGFloat.pi / 5)
         let direction: CGFloat = Bool.random() ? 1 : -1
-        let vx = cos(angle) * direction * PongBall.launchSpeed
-        let vy = sin(angle) * PongBall.launchSpeed
+        let vx = sin(angle) * direction * speed
+        let vy = cos(angle) * direction * speed
+
         ball.physicsBody?.velocity = CGVector(dx: vx, dy: vy)
 
         phase = .rally
         isBallResetting = false
     }
 
-    /// After a point (not match end): delay auto-serve or wait for tap per `PongRules`.
     private func schedulePointReset() {
         isBallResetting = true
         ball.physicsBody?.velocity = .zero
         ball.position = PongBall.restPosition
+        resetPaddlesToCenter()
 
         if PongRules.requireTapToServeAfterPoint {
             phase = .awaitingServe
             showServeHint()
         } else {
+            let combinedPoints = leftScore + rightScore
             let wait = SKAction.wait(forDuration: PongRules.postPointResetDelay)
             let fire = SKAction.run { [weak self] in
-                self?.launchBall()
+                self?.launchBall(totalPointsForSpeed: combinedPoints)
             }
             run(SKAction.sequence([wait, fire]), withKey: "postPointServe")
         }
@@ -214,7 +287,6 @@ final class PongScene: SKScene, SKPhysicsContactDelegate {
         syncScoresToBridge()
     }
 
-    /// Called from `PongGameBridge` (Restart) — full reset without recreating the scene.
     func restartMatchFromHUD() {
         removeAction(forKey: "postPointServe")
 
@@ -223,64 +295,71 @@ final class PongScene: SKScene, SKPhysicsContactDelegate {
         syncScoresToBridge()
 
         phase = .rally
+        resetPaddlesToCenter()
         launchBall()
     }
 
     // MARK: - Layout
 
     private func layoutPaddles() {
-        let halfW = Playfield.halfWidth
-        let halfPaddleH = PongPaddle.size.height / 2
+        let halfPaddleW = PongPaddle.size.width / 2
+        let minX = Playfield.innerLeftX + halfPaddleW + PongPaddle.marginFromPlayfield
+        let maxX = Playfield.innerRightX - halfPaddleW - PongPaddle.marginFromPlayfield
 
-        let minY = Playfield.innerBottomY + halfPaddleH + PongPaddle.marginFromPlayfield
-        let maxY = Playfield.innerTopY - halfPaddleH - PongPaddle.marginFromPlayfield
+        let topY = PongPaddle.topPaddleCenterY
+        let bottomY = PongPaddle.bottomPaddleCenterY
 
-        let leftX = -halfW + PongPaddle.marginFromPlayfield + PongPaddle.size.width / 2
-        let rightX = halfW - PongPaddle.marginFromPlayfield - PongPaddle.size.width / 2
-
-        func clampedY(for node: SKSpriteNode, defaultY: CGFloat) -> CGFloat {
-            let y = node.parent == nil ? defaultY : node.position.y
-            return min(max(y, minY), maxY)
+        func clampedX(for node: SKSpriteNode, defaultX: CGFloat) -> CGFloat {
+            let x = node.parent == nil ? defaultX : node.position.x
+            return min(max(x, minX), maxX)
         }
 
-        leftPaddle.position = CGPoint(x: leftX, y: clampedY(for: leftPaddle, defaultY: 0))
-        rightPaddle.position = CGPoint(x: rightX, y: clampedY(for: rightPaddle, defaultY: 0))
+        topPaddle.position = CGPoint(x: clampedX(for: topPaddle, defaultX: 0), y: topY)
+        bottomPaddle.position = CGPoint(x: clampedX(for: bottomPaddle, defaultX: 0), y: bottomY)
     }
 
-    private func paddleClampRange() -> (minY: CGFloat, maxY: CGFloat) {
-        let halfPaddleH = PongPaddle.size.height / 2
-        let minY = Playfield.innerBottomY + halfPaddleH + PongPaddle.marginFromPlayfield
-        let maxY = Playfield.innerTopY - halfPaddleH - PongPaddle.marginFromPlayfield
-        return (minY, maxY)
+    private func resetPaddlesToCenter() {
+        topPaddle.position.x = 0
+        bottomPaddle.position.x = 0
+        layoutPaddles()
     }
 
-    // MARK: - AI
+    private func paddleClampRange() -> (minX: CGFloat, maxX: CGFloat) {
+        let halfPaddleW = PongPaddle.size.width / 2
+        let minX = Playfield.innerLeftX + halfPaddleW + PongPaddle.marginFromPlayfield
+        let maxX = Playfield.innerRightX - halfPaddleW - PongPaddle.marginFromPlayfield
+        return (minX, maxX)
+    }
+
+    // MARK: - AI (top paddle)
 
     private func updateAIPaddle(deltaTime: CGFloat) {
-        let (minY, maxY) = paddleClampRange()
-        let targetY = ball.position.y
-        let currentY = leftPaddle.position.y
+        let (minX, maxX) = paddleClampRange()
+        let targetX = ball.position.x
+        let currentX = topPaddle.position.x
         let t = 1 - exp(-Double(aiTrackingLambda) * Double(deltaTime))
-        var y = currentY + (targetY - currentY) * CGFloat(t)
-        y = min(max(y, minY), maxY)
-        leftPaddle.position.y = y
+        var x = currentX + (targetX - currentX) * CGFloat(t)
+        x = min(max(x, minX), maxX)
+        topPaddle.position.x = x
     }
 
     // MARK: - Touch input
 
     private func updatePaddle(for touch: UITouch) {
         let location = touch.location(in: self)
-        let (minY, maxY) = paddleClampRange()
-        let clampedY = min(max(location.y, minY), maxY)
+        let (minX, maxX) = paddleClampRange()
+        let clampedX = min(max(location.x, minX), maxX)
 
         switch gameMode {
         case .onePlayerVsAI:
-            rightPaddle.position.y = clampedY
+            // Only the bottom paddle is human-controlled; ignore touches on the AI (top) half.
+            guard location.y < 0 else { return }
+            bottomPaddle.position.x = clampedX
         case .twoPlayers:
-            if location.x < 0 {
-                leftPaddle.position.y = clampedY
+            if location.y > 0 {
+                topPaddle.position.x = clampedX
             } else {
-                rightPaddle.position.y = clampedY
+                bottomPaddle.position.x = clampedX
             }
         }
     }
@@ -312,17 +391,25 @@ final class PongScene: SKScene, SKPhysicsContactDelegate {
         guard let ballBody = bodies.first(where: { $0.categoryBitMask == PhysicsCategory.ball }),
               ballBody.node === ball else { return }
 
-        guard let other = bodies.first(where: { $0 !== ballBody }),
-              other.categoryBitMask == PhysicsCategory.goal else { return }
+        guard let other = bodies.first(where: { $0 !== ballBody }) else { return }
 
-        if other.node?.name == "goalLeft" {
+        if other.categoryBitMask == PhysicsCategory.paddle {
+            applyPaddleBounce(paddleBody: other)
+            playPaddleHitSound()
+            return
+        }
+
+        guard other.categoryBitMask == PhysicsCategory.goal else { return }
+
+        if other.node?.name == "goalTop" {
             rightScore += 1
-        } else if other.node?.name == "goalRight" {
+        } else if other.node?.name == "goalBottom" {
             leftScore += 1
         } else {
             return
         }
 
+        playScoreSound()
         syncScoresToBridge()
 
         let win = PongRules.pointsToWin
@@ -332,6 +419,38 @@ final class PongScene: SKScene, SKPhysicsContactDelegate {
             enterGameOver(winner: .right)
         } else {
             schedulePointReset()
+        }
+    }
+
+    private func playSoundNamed(_ resource: String) {
+        run(SKAction.playSoundFileNamed(resource, waitForCompletion: false))
+    }
+
+    private func playPaddleHitSound() {
+        let t = ProcessInfo.processInfo.systemUptime
+        guard t - lastPaddleSoundAt >= paddleSoundCooldown else { return }
+        lastPaddleSoundAt = t
+        playSoundNamed(PongSoundFile.paddleHit)
+    }
+
+    private func playScoreSound() {
+        playSoundNamed(PongSoundFile.score)
+    }
+
+    /// Hit away from paddle center along x adds vx; each volley raises speed via `rallyHitCount`.
+    private func applyPaddleBounce(paddleBody: SKPhysicsBody) {
+        guard let paddleNode = paddleBody.node as? SKSpriteNode else { return }
+        rallyHitCount += 1
+        let speed = PongRules.rallySpeed(totalPointsScored: leftScore + rightScore, rallyHits: rallyHitCount)
+        let halfW = PongPaddle.size.width / 2
+        let offset = (ball.position.x - paddleNode.position.x) / halfW
+        let clamped = max(-1, min(1, offset))
+        let angle = clamped * PongRules.paddleMaxBounceAngle
+
+        if paddleNode === topPaddle {
+            ball.physicsBody?.velocity = CGVector(dx: sin(angle) * speed, dy: -cos(angle) * speed)
+        } else if paddleNode === bottomPaddle {
+            ball.physicsBody?.velocity = CGVector(dx: sin(angle) * speed, dy: cos(angle) * speed)
         }
     }
 }

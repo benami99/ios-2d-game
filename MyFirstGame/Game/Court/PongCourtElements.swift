@@ -5,38 +5,38 @@
 
 import SpriteKit
 
-/// Builds static court visuals: top/bottom walls (with physics) and the mid-court line (no physics).
+/// Static court visuals: **left/right walls** (physics) and mid-court **horizontal** line (cosmetic).
 enum PongCourtElements {
 
-    /// Horizontal strip along the top edge; nearly invisible sprite with a static physics body.
-    static func makeTopWall() -> SKSpriteNode {
+    /// Vertical strip along the left edge.
+    static func makeLeftWall() -> SKSpriteNode {
         let node = makeWallSprite()
-        let h = Playfield.wallThickness
-        let w = Playfield.logicalSize.width
+        let w = Playfield.wallThickness
+        let h = Playfield.logicalSize.height
         node.size = CGSize(width: w, height: h)
-        node.position = CGPoint(x: 0, y: Playfield.halfHeight - h / 2)
+        node.position = CGPoint(x: -Playfield.halfWidth + w / 2, y: 0)
         attachStaticWallPhysics(to: node)
         return node
     }
 
-    /// Horizontal strip along the bottom edge.
-    static func makeBottomWall() -> SKSpriteNode {
+    /// Vertical strip along the right edge.
+    static func makeRightWall() -> SKSpriteNode {
         let node = makeWallSprite()
-        let h = Playfield.wallThickness
-        let w = Playfield.logicalSize.width
+        let w = Playfield.wallThickness
+        let h = Playfield.logicalSize.height
         node.size = CGSize(width: w, height: h)
-        node.position = CGPoint(x: 0, y: -Playfield.halfHeight + h / 2)
+        node.position = CGPoint(x: Playfield.halfWidth - w / 2, y: 0)
         attachStaticWallPhysics(to: node)
         return node
     }
 
-    /// Vertical line at x = 0 between inner wall faces (cosmetic only).
+    /// Horizontal line at y = 0 between inner wall faces (cosmetic only).
     static func makeCenterLine() -> SKShapeNode {
-        let bottom = Playfield.innerBottomY
-        let top = Playfield.innerTopY
+        let left = Playfield.innerLeftX
+        let right = Playfield.innerRightX
         let path = CGMutablePath()
-        path.move(to: CGPoint(x: 0, y: bottom))
-        path.addLine(to: CGPoint(x: 0, y: top))
+        path.move(to: CGPoint(x: left, y: 0))
+        path.addLine(to: CGPoint(x: right, y: 0))
 
         let line = SKShapeNode(path: path)
         line.strokeColor = SKColor(white: 1, alpha: 0.22)
@@ -47,7 +47,6 @@ enum PongCourtElements {
 
     // MARK: - Private
 
-    /// Minimal visible sprite so hit testing / rendering behave consistently across OS versions.
     private static func makeWallSprite() -> SKSpriteNode {
         let node = SKSpriteNode(color: SKColor(white: 1, alpha: 0.02), size: CGSize(width: 1, height: 1))
         node.anchorPoint = CGPoint(x: 0.5, y: 0.5)
@@ -57,8 +56,8 @@ enum PongCourtElements {
     private static func attachStaticWallPhysics(to node: SKSpriteNode) {
         let body = SKPhysicsBody(rectangleOf: node.size)
         body.isDynamic = false
-        body.friction = 0.04
-        body.restitution = 0.96
+        body.friction = 0
+        body.restitution = 1
         body.categoryBitMask = PhysicsCategory.wall
         body.collisionBitMask = PhysicsCategory.ball
         node.physicsBody = body

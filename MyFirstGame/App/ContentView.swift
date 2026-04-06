@@ -22,23 +22,15 @@ struct ContentView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            VStack(spacing: 0) {
-                Picker("Mode", selection: $gameMode) {
-                    Text("1 vs AI").tag(PongGameMode.onePlayerVsAI)
-                    Text("2 players").tag(PongGameMode.twoPlayers)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-                .padding(.vertical, 8)
-                .onChange(of: gameMode) { _, newMode in
-                    scene = PongScene(gameMode: newMode, bridge: bridge)
-                }
+            // `id` forces a new `SpriteView` host when mode changes; otherwise the view can keep a stale scene (e.g. still in 2-player touch routing).
+            SpriteView(scene: scene)
+                .id(gameMode)
+                .ignoresSafeArea()
 
-                SpriteView(scene: scene)
-                    .ignoresSafeArea()
-            }
-
-            GameHUDView(bridge: bridge, gameMode: gameMode)
+            GameHUDView(bridge: bridge, gameMode: $gameMode)
+        }
+        .onChange(of: gameMode) { _, newMode in
+            scene = PongScene(gameMode: newMode, bridge: bridge)
         }
     }
 }

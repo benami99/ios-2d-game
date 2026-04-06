@@ -5,35 +5,36 @@
 
 import SpriteKit
 
-/// Invisible strips **behind** each paddle (between outer court edge and paddle face) — ball passes through; contact drives scoring.
+/// Invisible strips **behind** the top and bottom paddles — ball passes through; contact drives scoring.
 enum PongGoalZones {
 
-    /// Left strip from scene left edge up to the paddle’s outer face (uses same inset math as `PongScene.layoutPaddles`).
-    static func makeLeftGoal() -> SKSpriteNode {
-        let sceneLeft = -Playfield.halfWidth
-        let paddleLeftEdge = -Playfield.halfWidth + PongPaddle.marginFromPlayfield
-        let w = max(10, paddleLeftEdge - sceneLeft)
-        let centerX = (sceneLeft + paddleLeftEdge) / 2
-        return makeGoal(named: "goalLeft", centerX: centerX, width: w)
+    /// Strip above the top paddle (toward +y).
+    static func makeTopGoal() -> SKSpriteNode {
+        let outerTop = Playfield.halfHeight
+        let paddleOuterTop = PongPaddle.topPaddleCenterY + PongPaddle.size.height / 2
+        let h = max(10, outerTop - paddleOuterTop)
+        let centerY = (outerTop + paddleOuterTop) / 2
+        let w = Playfield.innerRightX - Playfield.innerLeftX
+        return makeGoal(named: "goalTop", center: CGPoint(x: 0, y: centerY), size: CGSize(width: w, height: h))
     }
 
-    /// Right strip from paddle’s outer face to the scene right edge.
-    static func makeRightGoal() -> SKSpriteNode {
-        let sceneRight = Playfield.halfWidth
-        let paddleRightEdge = Playfield.halfWidth - PongPaddle.marginFromPlayfield
-        let w = max(10, sceneRight - paddleRightEdge)
-        let centerX = (paddleRightEdge + sceneRight) / 2
-        return makeGoal(named: "goalRight", centerX: centerX, width: w)
+    /// Strip below the bottom paddle (toward -y).
+    static func makeBottomGoal() -> SKSpriteNode {
+        let outerBottom = -Playfield.halfHeight
+        let paddleOuterBottom = PongPaddle.bottomPaddleCenterY - PongPaddle.size.height / 2
+        let h = max(10, paddleOuterBottom - outerBottom)
+        let centerY = (outerBottom + paddleOuterBottom) / 2
+        let w = Playfield.innerRightX - Playfield.innerLeftX
+        return makeGoal(named: "goalBottom", center: CGPoint(x: 0, y: centerY), size: CGSize(width: w, height: h))
     }
 
     // MARK: - Private
 
-    private static func makeGoal(named name: String, centerX: CGFloat, width: CGFloat) -> SKSpriteNode {
-        let h = Playfield.innerTopY - Playfield.innerBottomY
-        let node = SKSpriteNode(color: SKColor(white: 1, alpha: 0.001), size: CGSize(width: width, height: h))
+    private static func makeGoal(named name: String, center: CGPoint, size: CGSize) -> SKSpriteNode {
+        let node = SKSpriteNode(color: SKColor(white: 1, alpha: 0.001), size: size)
         node.name = name
         node.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-        node.position = CGPoint(x: centerX, y: (Playfield.innerBottomY + Playfield.innerTopY) / 2)
+        node.position = center
 
         let body = SKPhysicsBody(rectangleOf: node.size)
         body.isDynamic = false
